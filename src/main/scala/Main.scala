@@ -7,14 +7,31 @@ object Main {
   case class Number(value: Int) extends Expression[Int]
   case class Bool(value: Boolean) extends Expression[Boolean]
 
-  case class Add(a: Expression[Int], b: Expression[Int]) extends Expression[Int]
-  case class AND(a: Expression[Boolean], b: Expression[Boolean]) extends Expression[Boolean]
+  case class Add[A, B](a: A with Expression[Int], b: B with Expression[Int]) extends Expression[Int]
+  case class AND[A, B](a: A with Expression[Boolean], b: B with Expression[Boolean]) extends Expression[Boolean]
 
-  def eval[T](e: Expression[T]): T = e match {
-    case Number(i) => i
-    case Bool(b) => b
-    case Add(a, b) => eval(a) + eval(b)
-    case AND(a, b) => eval(a) && eval(b)
+  trait Evaluator[E, T] {
+    def evaluate(e: E with Expression[T]): T
+  }
+
+  def eval[E, T](e: E with Expression[T])(implicit ev: Evaluator[E, T]): T = ev.evaluate(e)
+
+  def eitherEvaluator[E, T, E2, T2](e: Either[E with Expression[T], E2 with Expression[T2]])(implicit ev: Evaluator[E, T], ev2: Evaluator[E2, T2]): Either[T, T2] = e.map(eval).leftMap(eval)
+
+  implicit object NumberEvaluator extends Evaluator[Number, Int] {
+    def evaluate(n: Number) = n.value
+  }
+
+  implicit object BoolEvaluator extends Evaluator[Bool, Boolean] {
+    def evaluate(b: Bool) = b.value
+  }
+
+  implicit def AddEvaluator[A, B](implicit ae: Evaluator[A with Expression[Int], Int], be: Evaluator[B with Expression[Int], Int]): Evaluator[Add[A, B], Int] = new Evaluator[Add[A, B], Int] {
+    def evaluate(a: Add[A, B] with Expression[Int]) = eval(a.a) + eval(a.b)
+  }
+
+  implicit def ANDEvaluator[A, B](implicit ae: Evaluator[A with Expression[Boolean], Boolean], be: Evaluator[B with Expression[Boolean], Boolean]): Evaluator[AND[A, B], Boolean] = new Evaluator[AND[A, B], Boolean] {
+    def evaluate(a: AND[A, B] with Expression[Boolean]) = eval(a.a) && eval(a.b)
   }
 
   val ptrue = string("true") named "true" map(_ => Bool(true))
@@ -26,24 +43,26 @@ object Main {
 
   val boolp = (ptrue | pfalse)
 
-  val addExpr: Parser[Expression[Int]] = for {
+  val addExpr: Parser[Add[Number, Number] with Expression[Int]] = for {
     a <- number
     _ <- add
     b <- number
   } yield (Add(a, b))
 
-  val andExpr: Parser[Expression[Boolean]] = for {
+  val andExpr: Parser[AND[Bool, Bool] with Expression[Boolean]] = for {
     a <- boolp
     _ <- and
     b <- boolp
   } yield (AND(a, b))
 
 
-  val program: Parser[Expression[Int | Boolean]] = (addExpr union andExpr).map(_.typemerge())
+  val program = (addExpr || andExpr)
+
 
   def main(args: Array[String]): Unit = {
-    println(program.parse("2+2").done.map(eval))
-    println(program.parse("true&&true").done.map(eval))
+    println(number.parse("2").done.map(eval))
+    println(program.parse("2+2").done.map(eitherEvaluator))
+    println(program.parse("true&&true").done.map(eitherEvaluator))
   }
 
   implicit class DottyParser[A](a: Parser[A]) {
