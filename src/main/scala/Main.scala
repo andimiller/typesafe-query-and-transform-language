@@ -6,12 +6,15 @@ object Main {
   sealed trait Expression[+T]
   case class Number(value: Int) extends Expression[Number] {
     def plus(n: Number): Number = Number(value + n.value)
-  }
+  } 
   case class Bool(value: Boolean) extends Expression[Bool] {
     def and(b: Bool): Bool = Bool(value && b.value)
   }
   case class Str(value: String) extends Expression[Str] {
     def concat(s: Str): Str = Str(value + s.value)
+  }
+  case class MyUnit() extends Expression[MyUnit] {
+    implicit val eval: Eval[MyUnit, MyUnit] = (u: WhichReturnsItself[MyUnit]) => u
   }
 
   case class Add[A, B, O](a: A & Expression[O], b: B & Expression[O]) extends Expression[O]
@@ -30,16 +33,11 @@ object Main {
 
   def eitherEvaluator[E, T, E2, T2](e: Either[E WhichReturns T, E2 WhichReturns T2])(implicit ev: Evaluator[E, T], ev2: Evaluator[E2, T2]): Either[T, T2] = e.map(eval).leftMap(eval)
 
-  // why doesn't this work?
-  implicit def IdentityEvaluator[T](): Evaluator[T WhichReturns T, T] = (e: T WhichReturns T) => e
+  def identityEvaluator[T](): Evaluator[T WhichReturns T, T] = (e: T WhichReturns T) => e
 
-  implicit object NumberIdentity extends Evaluator[WhichReturnsItself[Number], Number] {
-    def evaluate(n: WhichReturnsItself[Number]): Number = n
-  }
-
-  implicit object BoolIdentity extends Evaluator[WhichReturnsItself[Bool], Bool] {
-    def evaluate(b: WhichReturnsItself[Bool]): Bool = b
-  }
+  implicit val numberIdentity: Evaluator[Number WhichReturns Number, Number] = identityEvaluator[Number]()
+  implicit val boolIdentity: Evaluator[Bool WhichReturns Bool, Bool] = identityEvaluator[Bool]()
+  implicit val strIdentity: Evaluator[Str WhichReturns Str, Str] = identityEvaluator[Str]()
 
   implicit def AddIntEvaluator[A, B](implicit ae: Eval[A, Number], be: Eval[B, Number]): Evaluator[Add[A, B, Number], Number] = new Evaluator[Add[A, B, Number], Number] {
     def evaluate(a: Add[A, B, Number] WhichReturns Number): Number = eval(a.a).plus(eval(a.b))
@@ -55,11 +53,21 @@ object Main {
 
   val add = char('+') named "add"
   val and = string("&&") named "and"
+  val quote = char('"') named "quote"
+
+  val stringLiteral: Parser[Str WhichReturns Str] = for {
+    _ <- quote
+    str <- takeWhile(_!='"')
+    _ <- quote
+  } yield (Str(str))
 
   val boolp: Parser[Bool WhichReturns Bool] = (ptrue | pfalse)
 
-  val addExpr: Parser[Add[Number WhichReturns Number, Number WhichReturns Number, Number] WhichReturns Number] = for {
-    a <- number
+  type Literal = Str | Number | Bool
+  val literal: Parser[Literal] = stringLiteral.widen[Literal] | number.widen[Literal] | boolp.widen[Literal]
+
+  val addExpr: Parser[Add[WhichReturnsItself[Number], WhichReturnsItself[Number], Number] WhichReturns Number] = for {
+    a <- number 
     _ <- add
     b <- number
   } yield (Add(a, b))
@@ -88,6 +96,8 @@ object Main {
         case Right(b) => println(b)
       }
     }
+    // literals
+    println(List("\"hello\"", "12", "true").map(literal.parse).map(_.done))
   }
 
   implicit class DottyParser[A](a: Parser[A]) {
