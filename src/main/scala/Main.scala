@@ -4,13 +4,21 @@ import atto._, Atto._
 object Main {
 
   sealed trait Expression[+T]
-  case class Number(value: Int) extends Expression[Int]
-  case class Bool(value: Boolean) extends Expression[Boolean]
+  case class Number(value: Int) extends Expression[Number] {
+    def plus(n: Number): Number = Number(value + n.value)
+  }
+  case class Bool(value: Boolean) extends Expression[Bool] {
+    def and(b: Bool): Bool = Bool(value && b.value)
+  }
+  case class Str(value: String) extends Expression[Str] {
+    def concat(s: Str): Str = Str(value + s.value)
+  }
 
-  case class Add[A, B](a: A & Expression[Int], b: B & Expression[Int]) extends Expression[Int]
-  case class AND[A, B](a: A & Expression[Boolean], b: B & Expression[Boolean]) extends Expression[Boolean]
+  case class Add[A, B, O](a: A & Expression[O], b: B & Expression[O]) extends Expression[O]
+  case class AND[A, B, O](a: A & Expression[O], b: B & Expression[O]) extends Expression[O]
 
   type WhichReturns[A, T] = A & Expression[T]
+  type WhichReturnsItself[T] = T WhichReturns T
 
   type Eval[E, T] = Evaluator[E WhichReturns T, T]
 
@@ -22,38 +30,41 @@ object Main {
 
   def eitherEvaluator[E, T, E2, T2](e: Either[E WhichReturns T, E2 WhichReturns T2])(implicit ev: Evaluator[E, T], ev2: Evaluator[E2, T2]): Either[T, T2] = e.map(eval).leftMap(eval)
 
-  implicit object NumberEvaluator extends Evaluator[Number, Int] {
-    def evaluate(n: Number) = n.value
+  // why doesn't this work?
+  implicit def IdentityEvaluator[T](): Evaluator[T WhichReturns T, T] = (e: T WhichReturns T) => e
+
+  implicit object NumberIdentity extends Evaluator[WhichReturnsItself[Number], Number] {
+    def evaluate(n: WhichReturnsItself[Number]): Number = n
   }
 
-  implicit object BoolEvaluator extends Evaluator[Bool, Boolean] {
-    def evaluate(b: Bool) = b.value
+  implicit object BoolIdentity extends Evaluator[WhichReturnsItself[Bool], Bool] {
+    def evaluate(b: WhichReturnsItself[Bool]): Bool = b
   }
 
-  implicit def AddEvaluator[A, B](implicit ae: Eval[A, Int], be: Eval[B, Int]): Evaluator[Add[A, B], Int] = new Evaluator[Add[A, B], Int] {
-    def evaluate(a: Add[A, B] & Expression[Int]) = eval(a.a) + eval(a.b)
+  implicit def AddIntEvaluator[A, B](implicit ae: Eval[A, Number], be: Eval[B, Number]): Evaluator[Add[A, B, Number], Number] = new Evaluator[Add[A, B, Number], Number] {
+    def evaluate(a: Add[A, B, Number] WhichReturns Number): Number = eval(a.a).plus(eval(a.b))
   }
 
-  implicit def ANDEvaluator[A, B](implicit ae: Eval[A, Boolean], be: Eval[B, Boolean]): Evaluator[AND[A, B], Boolean] = new Evaluator[AND[A, B], Boolean] {
-    def evaluate(a: AND[A, B] & Expression[Boolean]) = eval(a.a) && eval(a.b)
-  }
+  implicit def AddStringEvaluator[A, B](implicit ae: Eval[A, Str], be: Eval[B, Str]): Evaluator[Add[A, B, Str], Str] = (a: Add[A, B, Str] WhichReturns Str) => eval(a.a).concat(eval(a.b))
 
-  val ptrue = string("true") named "true" map(_ => Bool(true))
-  val pfalse = string("false") named "false" map(_ => Bool(false))
-  val number = int named "number" map(i => Number(i))
+  implicit def ANDEvaluator[A, B]()(implicit ae: Eval[A, Bool], be: Eval[B, Bool]): Evaluator[AND[A, B, Bool], Bool] = (a: AND[A, B, Bool] WhichReturns Bool) => eval(a.a).and(eval(a.b))
+
+  val ptrue: Parser[Bool WhichReturns Bool] = string("true") named "true" map(_ => Bool(true))
+  val pfalse: Parser[Bool WhichReturns Bool] = string("false") named "false" map(_ => Bool(false))
+  val number: Parser[Number WhichReturns Number] = int named "number" map(i => Number(i))
 
   val add = char('+') named "add"
   val and = string("&&") named "and"
 
-  val boolp = (ptrue | pfalse)
+  val boolp: Parser[Bool WhichReturns Bool] = (ptrue | pfalse)
 
-  val addExpr: Parser[Add[Number, Number] & Expression[Int]] = for {
+  val addExpr: Parser[Add[Number WhichReturns Number, Number WhichReturns Number, Number] WhichReturns Number] = for {
     a <- number
     _ <- add
     b <- number
   } yield (Add(a, b))
 
-  val andExpr: Parser[AND[Bool, Bool] & Expression[Boolean]] = for {
+  val andExpr: Parser[AND[Bool WhichReturns Bool, Bool WhichReturns Bool, Bool] WhichReturns Bool] = for {
     a <- boolp
     _ <- and
     b <- boolp
@@ -65,6 +76,12 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     println(number.parse("2").done.map(eval))
+    println(addExpr.parse("2+2").done.map(eval))
+
+    // why do I have to manually summon this?
+    implicit val t: Evaluator[AND[Bool WhichReturns Bool, Bool WhichReturns Bool, Bool], Bool] = ANDEvaluator[Bool WhichReturns Bool, Bool WhichReturns Bool]()
+
+    println(andExpr.parse("true&&false").done.map(eval))
     println(program.parse("2+2").done.map(eitherEvaluator))
     println(program.parse("true&&true").done.map(eitherEvaluator))
     val f = program.parse("42+42").done.map(eitherEvaluator)
