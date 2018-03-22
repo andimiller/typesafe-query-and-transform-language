@@ -47,7 +47,7 @@ object Main {
 
   implicit def AddStringEvaluator[A, B](implicit ae: Eval[A, Str], be: Eval[B, Str]): Evaluator[Add[A, B, Str], Str] = (a: Add[A, B, Str] WhichReturns Str) => eval(a.a).concat(eval(a.b))
 
-  implicit def ANDEvaluator[A, B]()(implicit ae: Eval[A, Bool], be: Eval[B, Bool]): Evaluator[AND[A, B, Bool], Bool] = (a: AND[A, B, Bool] WhichReturns Bool) => eval(a.a).and(eval(a.b))
+  implicit def ANDEvaluator[A, B](implicit ae: Eval[A, Bool], be: Eval[B, Bool]): Evaluator[AND[A, B, Bool], Bool] = (a: AND[A, B, Bool] WhichReturns Bool) => eval(a.a).and(eval(a.b))
 
   val ptrue: Parser[Bool WhichReturns Bool] = string("true") named "true" map(_ => Bool(true))
   val pfalse: Parser[Bool WhichReturns Bool] = string("false") named "false" map(_ => Bool(false))
@@ -77,11 +77,8 @@ object Main {
   def main(args: Array[String]): Unit = {
     println(number.parse("2").done.map(eval))
     println(addExpr.parse("2+2").done.map(eval))
-
-    // why do I have to manually summon this?
-    implicit val t: Evaluator[AND[Bool WhichReturns Bool, Bool WhichReturns Bool, Bool], Bool] = ANDEvaluator[Bool WhichReturns Bool, Bool WhichReturns Bool]()
-
     println(andExpr.parse("true&&false").done.map(eval))
+    println(andExpr.parse("true&&true").done.map(eval))
     println(program.parse("2+2").done.map(eitherEvaluator))
     println(program.parse("true&&true").done.map(eitherEvaluator))
     val f = program.parse("42+42").done.map(eitherEvaluator)
