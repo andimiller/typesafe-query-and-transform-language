@@ -47,9 +47,11 @@ object Main {
 
   implicit def ANDEvaluator[A, B](implicit ae: Eval[A, Bool], be: Eval[B, Bool]): Evaluator[AND[A, B, Bool], Bool] = (a: AND[A, B, Bool] WhichReturns Bool) => eval(a.a).and(eval(a.b))
 
-  val ptrue: Parser[Bool WhichReturns Bool] = string("true") named "true" map(_ => Bool(true))
-  val pfalse: Parser[Bool WhichReturns Bool] = string("false") named "false" map(_ => Bool(false))
-  val number: Parser[Number WhichReturns Number] = int named "number" map(i => Number(i))
+  val ptrue: Parser[Bool & Expression[Bool]] = string("true") named "true" map(_ => Bool(true))
+  val pfalse: Parser[Bool & Expression[Bool]] = string("false") named "false" map(_ => Bool(false))
+  val number: Parser[Number & Expression[Number]] = int named "number" map(i => Number(i))
+
+  type Literal[T] = T & Expression[T]
 
   val add = char('+') named "add"
   val and = string("&&") named "and"
@@ -63,8 +65,7 @@ object Main {
 
   val boolp: Parser[Bool WhichReturns Bool] = (ptrue | pfalse)
 
-  type Literal = Str | Number | Bool
-  val literal: Parser[Literal] = stringLiteral.widen[Literal] | number.widen[Literal] | boolp.widen[Literal]
+  val literal = stringLiteral.widen[Literal[Str]] union number.widen[Literal[Number]] union boolp.widen[Literal[Bool]]
 
   val addExpr: Parser[Add[WhichReturnsItself[Number], WhichReturnsItself[Number], Number] WhichReturns Number] = for {
     a <- number 
@@ -78,6 +79,12 @@ object Main {
     b <- boolp
   } yield (AND(a, b))
 
+  def newAdd = for {
+    a <- literal
+    _ <- add
+    b <- literal
+  } yield (Add(a, b))
+
 
   val program = (addExpr || andExpr)
 
@@ -89,6 +96,8 @@ object Main {
     println(andExpr.parse("true&&true").done.map(eval))
     println(program.parse("2+2").done.map(eitherEvaluator))
     println(program.parse("true&&true").done.map(eitherEvaluator))
+    println(newAdd.parse("\"hello\"+\"world\"").done)
+    println(newAdd.parse("\"hello\"+2").done)
     val f = program.parse("42+42").done.map(eitherEvaluator)
     f.map { 
       _ match {
